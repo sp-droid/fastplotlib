@@ -7,18 +7,25 @@ from numpy.typing import ArrayLike
 
 from ...utils import subsample_array, ArrayProtocol
 
-from ...graphics import ImageGraphic, LineGraphic, LineStack, LineCollection, ScatterGraphic
+from ...graphics import (
+    ImageGraphic,
+    LineGraphic,
+    LineStack,
+    LineCollection,
+    ScatterGraphic,
+)
 from ._processor_base import NDProcessor
+
 
 # TODO: Maybe get rid of n_display_dims in NDProcessor,
 #  we will know the display dims automatically here from the last dim
 #  so maybe we only need it for images?
 class NDPositionsProcessor(NDProcessor):
     def __init__(
-            self,
-            data: ArrayProtocol,
-            multi: bool = False,  # TODO: interpret [n - 2] dimension as n_lines or n_points
-            display_window: int | float | None = 100,  # window for n_datapoints dim only
+        self,
+        data: ArrayProtocol,
+        multi: bool = False,  # TODO: interpret [n - 2] dimension as n_lines or n_points
+        display_window: int | float | None = 100,  # window for n_datapoints dim only
     ):
         super().__init__(data=data)
 
@@ -52,8 +59,10 @@ class NDPositionsProcessor(NDProcessor):
     @multi.setter
     def multi(self, m: bool):
         if m and self.data.ndim < 3:
-            # p is p-datapoints, n is how many lines/scatter to show simultaneously
-            raise ValueError("ndim must be >= 3 for multi, shape must be [s1..., sn, n, p, 2 | 3]")
+            # p is p-datapoints, n is how many lines to show simultaneously (for line collection/stack)
+            raise ValueError(
+                "ndim must be >= 3 for multi, shape must be [s1..., sn, n, p, 2 | 3]"
+            )
 
         self._multi = m
 
@@ -81,7 +90,12 @@ class NDPositionsProcessor(NDProcessor):
 
 
 class NDPositions:
-    def __init__(self, data, graphic: Type[LineGraphic | LineCollection | LineStack | ScatterGraphic], multi: bool = False):
+    def __init__(
+        self,
+        data,
+        graphic: Type[LineGraphic | LineCollection | LineStack | ScatterGraphic],
+        multi: bool = False,
+    ):
         self._indices = 0
 
         if issubclass(graphic, LineCollection):
@@ -96,7 +110,11 @@ class NDPositions:
         return self._processor
 
     @property
-    def graphic(self) -> LineGraphic | LineCollection | LineStack | ScatterGraphic | list[ScatterGraphic]:
+    def graphic(
+        self,
+    ) -> (
+        LineGraphic | LineCollection | LineStack | ScatterGraphic
+    ):
         """LineStack or ImageGraphic for heatmaps"""
         return self._graphic
 
@@ -113,17 +131,20 @@ class NDPositions:
             for i in range(len(self.graphic)):
                 # data_slice shape is [n_scatters, n_datapoints, 2 | 3]
                 # by using data_slice.shape[-1] it will auto-select if the data is only xy or has xyz
-                self.graphic[i].data[:, :data_slice.shape[-1]] = data_slice[i]
+                self.graphic[i].data[:, : data_slice.shape[-1]] = data_slice[i]
 
         elif isinstance(self.graphic, (LineGraphic, ScatterGraphic)):
-            self.graphic.data[:, :data_slice.shape[-1]] = data_slice
+            self.graphic.data[:, : data_slice.shape[-1]] = data_slice
 
         elif isinstance(self.graphic, LineCollection):
             for i in range(len(self.graphic)):
                 # data_slice shape is [n_lines, n_datapoints, 2 | 3]
-                self.graphic[i].data[:, :data_slice.shape[-1]] = data_slice[i]
+                self.graphic[i].data[:, : data_slice.shape[-1]] = data_slice[i]
 
-    def _create_graphic(self, graphic_cls: Type[LineGraphic | LineCollection | LineStack | ScatterGraphic]):
+    def _create_graphic(
+        self,
+        graphic_cls: Type[LineGraphic | LineCollection | LineStack | ScatterGraphic],
+    ):
         if self.processor.multi and issubclass(graphic_cls, ScatterGraphic):
             # make list of scatters
             self._graphic = list()

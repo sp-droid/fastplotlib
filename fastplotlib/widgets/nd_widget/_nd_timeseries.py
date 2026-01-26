@@ -137,15 +137,17 @@ class NDTimeSeries:
             # make sure "yz" data is only ys and no z values
             # can't represent y and z vals in a heatmap
             if self.processor.data[1].ndim > 2:
-                raise ValueError("Only y-values are supported for heatmaps, not yz-values")
+                raise ValueError(
+                    "Only y-values are supported for heatmaps, not yz-values"
+                )
             self._create_heatmap()
 
     @property
-    def display_window(self) ->  int | float | None:
+    def display_window(self) -> int | float | None:
         return self.processor.display_window
 
     @display_window.setter
-    def display_window(self, dw:  int | float | None):
+    def display_window(self, dw: int | float | None):
         # create new graphic if it changed
         if dw != self.display_window:
             create_new_graphic = True
@@ -181,7 +183,9 @@ class NDTimeSeries:
 
     def _create_line_stack_data(self, data_slice):
         xs = data_slice[0]  # 1D
-        yz = data_slice[1]  # [n_lines, n_datapoints] for y-vals or [n_lines, n_datapoints, 2] for yz-vals
+        yz = data_slice[
+            1
+        ]  # [n_lines, n_datapoints] for y-vals or [n_lines, n_datapoints, 2] for yz-vals
 
         # need to go from x_vals and yz_vals arrays to an array of shape: [n_lines, n_datapoints, 2 | 3]
         return np.dstack([np.repeat(xs[None], repeats=yz.shape[0], axis=0), yz])
@@ -199,7 +203,7 @@ class NDTimeSeries:
         # this is very fast to do on the fly, especially for typical small display windows
         x, y = data_slice
         norm = np.linalg.norm(np.diff(np.diff(x))) / x.size
-        if norm > 10 ** -12:
+        if norm > 10**-12:
             # need to create evenly spaced x-values
             x_uniform = np.linspace(x[0], x[-1], num=x.size)
             # yz is [n_lines, n_datapoints]
