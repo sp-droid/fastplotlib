@@ -216,6 +216,9 @@ class NDPositions:
 
     @graphic.setter
     def graphic(self, graphic_type):
+        if isinstance(self.graphic, graphic_type):
+            return
+
         plot_area = self._graphic._plot_area
         plot_area.delete_graphic(self._graphic)
 
