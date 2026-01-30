@@ -13,6 +13,7 @@ from ...graphics import (
     LineStack,
     LineCollection,
     ScatterGraphic,
+    ScatterCollection,
 )
 from ._processor_base import NDProcessor
 
@@ -122,7 +123,7 @@ class NDPositionsProcessor(NDProcessor):
                 start = max(0, i - hw)
 
                 # stop index cannot exceed the bounds of this dimension
-                stop = min(self.shape[dim_index] - 1, i + hw)
+                stop = min(self.shape[dim_index], i + hw)
 
                 s = slice(start, stop, 1)
             else:
@@ -148,23 +149,34 @@ class NDPositionsProcessor(NDProcessor):
         Note that we do not use __getitem__ here since the index is a tuple specifying a single integer
         index for each dimension. Slices are not allowed, therefore __getitem__ is not suitable here.
         """
-        # apply window funcs
-        # this array should be of shape [n_datapoints, 2 | 3]
-        window_output = self._apply_window_functions(indices[:-1]).squeeze()
+        if len(indices) > 1:
+            # there are dims in addition to the n_datapoints dim
+            # apply window funcs
+            # window_output array should be of shape [n_datapoints, 2 | 3]
+            window_output = self._apply_window_functions(indices[:-1]).squeeze()
+        else:
+            window_output = self.data
 
         # TODO: window function on the `p` n_datapoints dimension
 
         if self.display_window is not None:
             dw = self.display_window
 
-            # half window size
-            hw = dw // 2
+            if dw == 1:
+                slices = [slice(indices[-1], indices[-1] + 1)]
 
-            # for now assume just a single index provided that indicates x axis value
-            start = max(indices[-1] - hw, 0)
-            stop = start + dw
+            else:
+                # half window size
+                hw = dw // 2
 
-            slices = [slice(start, stop)]
+                # for now assume just a single index provided that indicates x axis value
+                start = max(indices[-1] - hw, 0)
+                stop = start + dw
+
+                # TODO: uncomment this once we have resizeable buffers!!
+                # stop = min(indices[-1] + hw, self.shape[-2])
+
+                slices = [slice(start, stop)]
 
             if self.multi:
                 # n - 2 dim is n_lines or n_scatters
@@ -177,14 +189,15 @@ class NDPositions:
     def __init__(
         self,
         data,
-        graphic: Type[LineGraphic | LineCollection | LineStack | ScatterGraphic],
+        graphic: Type[LineGraphic | LineCollection | LineStack | ScatterGraphic | ScatterCollection | ImageGraphic],
         multi: bool = False,
+        display_window: int = 10,
     ):
         if issubclass(graphic, LineCollection):
             multi = True
 
-        self._processor = NDPositionsProcessor(data, multi=multi, display_window=100, n_slider_dims=2)
-        self._indices = tuple([0] * (2 + 1))
+        self._processor = NDPositionsProcessor(data, multi=multi, display_window=display_window, n_slider_dims=0)
+        self._indices = tuple([0] * (0 + 1))
 
         self._create_graphic(graphic)
 
@@ -196,10 +209,18 @@ class NDPositions:
     def graphic(
         self,
     ) -> (
-        LineGraphic | LineCollection | LineStack | ScatterGraphic
+        LineGraphic | LineCollection | LineStack | ScatterGraphic | ScatterCollection | ImageGraphic
     ):
         """LineStack or ImageGraphic for heatmaps"""
         return self._graphic
+
+    @graphic.setter
+    def graphic(self, graphic_type):
+        plot_area = self._graphic._plot_area
+        plot_area.delete_graphic(self._graphic)
+
+        self._create_graphic(graphic_type)
+        plot_area.add_graphic(self._graphic)
 
     @property
     def indices(self) -> tuple:
@@ -209,33 +230,47 @@ class NDPositions:
     def indices(self, indices):
         data_slice = self.processor.get(indices)
 
-        if isinstance(self.graphic, list):
-            # list of scatter
-            for i in range(len(self.graphic)):
-                # data_slice shape is [n_scatters, n_datapoints, 2 | 3]
-                # by using data_slice.shape[-1] it will auto-select if the data is only xy or has xyz
-                self.graphic[i].data[:, : data_slice.shape[-1]] = data_slice[i]
-
-        elif isinstance(self.graphic, (LineGraphic, ScatterGraphic)):
+        if isinstance(self.graphic, (LineGraphic, ScatterGraphic)):
             self.graphic.data[:, : data_slice.shape[-1]] = data_slice
 
-        elif isinstance(self.graphic, LineCollection):
+        elif isinstance(self.graphic, (LineCollection, ScatterCollection)):
             for i in range(len(self.graphic)):
                 # data_slice shape is [n_lines, n_datapoints, 2 | 3]
                 self.graphic[i].data[:, : data_slice.shape[-1]] = data_slice[i]
 
+        elif isinstance(self.graphic, ImageGraphic):
+            image_data, x0, x_scale = self._create_heatmap_data(data_slice)
+            self.graphic.data = image_data
+            self.graphic.offset = (x0, *self.graphic.offset[1:])
+
     def _create_graphic(
         self,
-        graphic_cls: Type[LineGraphic | LineCollection | LineStack | ScatterGraphic],
+        graphic_cls: Type[LineGraphic | LineCollection | LineStack | ScatterGraphic | ScatterCollection | ImageGraphic],
     ):
-        if self.processor.multi and issubclass(graphic_cls, ScatterGraphic):
-            # make list of scatters
-            self._graphic = list()
-            data_slice = self.processor.get(self.indices)
-            for d in data_slice:
-                scatter = graphic_cls(d)
-                self._graphic.append(scatter)
+
+        data_slice = self.processor.get(self.indices)
+
+        if issubclass(graphic_cls, ImageGraphic):
+            image_data, x0, x_scale = self._create_heatmap_data(data_slice)
+            self._graphic = graphic_cls(image_data, offset=(x0, 0, -1), scale=(x_scale, 1, 1))
 
         else:
-            data_slice = self.processor.get(self.indices)
             self._graphic = graphic_cls(data_slice)
+
+    def _create_heatmap_data(self, data_slice) -> tuple[np.ndarray, float, float]:
+        if not self.processor.multi:
+            raise ValueError
+
+        if self.processor.data.shape[-1] != 2:
+            raise ValueError
+
+        # return [n_rows, n_cols] shape data
+
+        image_data = data_slice[..., 1]
+
+        # assume all x values are the same
+        x_scale = data_slice[:, -1, 0][0] / data_slice.shape[1]
+
+        x0 = data_slice[0, 0, 0]
+
+        return image_data, x0, x_scale

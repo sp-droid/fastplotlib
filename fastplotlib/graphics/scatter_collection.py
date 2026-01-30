@@ -117,7 +117,7 @@ class ScatterCollection(GraphicCollection, _ScatterCollectionProperties):
         uniform_colors: bool = False,
         cmap: Sequence[str] | str = None,
         cmap_transform: np.ndarray | List = None,
-        sizes: float | Sequence[float] = 2.0,
+        sizes: float | Sequence[float] = 5.0,
         name: str = None,
         names: list[str] = None,
         metadata: Any = None,
