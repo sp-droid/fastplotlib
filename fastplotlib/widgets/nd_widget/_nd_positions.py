@@ -26,12 +26,15 @@ class NDPositionsProcessor(NDProcessor):
         data: ArrayProtocol,
         multi: bool = False,  # TODO: interpret [n - 2] dimension as n_lines or n_points
         display_window: int | float | None = 100,  # window for n_datapoints dim only
+        n_slider_dims: int = 0,
     ):
         super().__init__(data=data)
 
         self._display_window = display_window
 
         self.multi = multi
+
+        self.n_slider_dims = n_slider_dims
 
     def _validate_data(self, data: ArrayProtocol):
         # TODO: determine right validation shape etc.
@@ -66,27 +69,108 @@ class NDPositionsProcessor(NDProcessor):
 
         self._multi = m
 
-    def __getitem__(self, indices: tuple[Any, ...]):
-        """sliders through all slider dims and outputs an array that can be used to set graphic data"""
+    def _apply_window_functions(self, indices: tuple[int, ...]):
+        """applies the window functions for each dimension specified"""
+        # window size for each dim
+        winds = self._window_sizes
+        # window function for each dim
+        funcs = self._window_funcs
+
+        if winds is None or funcs is None:
+            # no window funcs or window sizes, just slice data and return
+            # clamp to max bounds
+            indexer = list()
+            for dim, i in enumerate(indices):
+                i = min(self.shape[dim] - 1, i)
+                indexer.append(i)
+
+            return self.data[tuple(indexer)]
+
+        # order in which window funcs are applied
+        order = self._window_order
+
+        if order is not None:
+            # remove any entries in `window_order` where the specified dim
+            # has a window function or window size specified as `None`
+            # example:
+            # window_sizes = (3, 2)
+            # window_funcs = (np.mean, None)
+            # order = (0, 1)
+            # `1` is removed from the order since that window_func is `None`
+            order = tuple(
+                d for d in order if winds[d] is not None and funcs[d] is not None
+            )
+        else:
+            # sequential order
+            order = list()
+            for d in range(self.n_slider_dims):
+                if winds[d] is not None and funcs[d] is not None:
+                    order.append(d)
+
+        # the final indexer which will be used on the data array
+        indexer = list()
+
+        for dim_index, (i, w, f) in enumerate(zip(indices, winds, funcs)):
+            # clamp i within the max bounds
+            i = min(self.shape[dim_index] - 1, i)
+
+            if (w is not None) and (f is not None):
+                # specify slice window if both window size and function for this dim are not None
+                hw = int((w - 1) / 2)  # half window
+
+                # start index cannot be less than 0
+                start = max(0, i - hw)
+
+                # stop index cannot exceed the bounds of this dimension
+                stop = min(self.shape[dim_index] - 1, i + hw)
+
+                s = slice(start, stop, 1)
+            else:
+                s = slice(i, i + 1, 1)
+
+            indexer.append(s)
+
+        # apply indexer to slice data with the specified windows
+        data_sliced = self.data[tuple(indexer)]
+
+        # finally apply the window functions in the specified order
+        for dim in order:
+            f = funcs[dim]
+
+            data_sliced = f(data_sliced, axis=dim, keepdims=True)
+
+        return data_sliced
+
+    def get(self, indices: tuple[Any, ...]):
+        """
+        slices through all slider dims and outputs an array that can be used to set graphic data
+
+        Note that we do not use __getitem__ here since the index is a tuple specifying a single integer
+        index for each dimension. Slices are not allowed, therefore __getitem__ is not suitable here.
+        """
+        # apply window funcs
+        # this array should be of shape [n_datapoints, 2 | 3]
+        window_output = self._apply_window_functions(indices[:-1]).squeeze()
+
+        # TODO: window function on the `p` n_datapoints dimension
+
         if self.display_window is not None:
-            indices_window = self.display_window
+            dw = self.display_window
 
             # half window size
-            hw = indices_window // 2
+            hw = dw // 2
 
             # for now assume just a single index provided that indicates x axis value
-            start = max(indices - hw, 0)
-            stop = start + indices_window
+            start = max(indices[-1] - hw, 0)
+            stop = start + dw
 
             slices = [slice(start, stop)]
 
-            # TODO: implement slicing for multiple slider dims, i.e. [s1, s2, ... n_datapoints, 2 | 3]
-            #  this currently assumes the shape is: [n_datapoints, 2 | 3]
             if self.multi:
                 # n - 2 dim is n_lines or n_scatters
                 slices.insert(0, slice(None))
 
-            return self.data[tuple(slices)]
+            return window_output[tuple(slices)]
 
 
 class NDPositions:
@@ -96,12 +180,11 @@ class NDPositions:
         graphic: Type[LineGraphic | LineCollection | LineStack | ScatterGraphic],
         multi: bool = False,
     ):
-        self._indices = 0
-
         if issubclass(graphic, LineCollection):
             multi = True
 
-        self._processor = NDPositionsProcessor(data, multi=multi)
+        self._processor = NDPositionsProcessor(data, multi=multi, display_window=100, n_slider_dims=2)
+        self._indices = tuple([0] * (2 + 1))
 
         self._create_graphic(graphic)
 
@@ -124,7 +207,7 @@ class NDPositions:
 
     @indices.setter
     def indices(self, indices):
-        data_slice = self.processor[indices]
+        data_slice = self.processor.get(indices)
 
         if isinstance(self.graphic, list):
             # list of scatter
@@ -148,11 +231,11 @@ class NDPositions:
         if self.processor.multi and issubclass(graphic_cls, ScatterGraphic):
             # make list of scatters
             self._graphic = list()
-            data_slice = self.processor[self.indices]
+            data_slice = self.processor.get(self.indices)
             for d in data_slice:
                 scatter = graphic_cls(d)
                 self._graphic.append(scatter)
 
         else:
-            data_slice = self.processor[self.indices]
+            data_slice = self.processor.get(self.indices)
             self._graphic = graphic_cls(data_slice)
