@@ -62,7 +62,7 @@ class MeshGraphic(Graphic):
             Used only if `mode` = "slice". The plane is defined in world space.
 
         colors: str, array, or iterable, default "w"
-            A uniform color (name or RGBA tuple), per-vertex colors (length=positions), or per-face colors (length=indices).
+            A uniform color (name or linear-RGBA tuple), per-vertex colors (length=positions), or per-face colors (length=indices). The introduced color is assumed to be in linear RGB scale. Popular colormaps such as the ones from matplotlib give it in sRGB. Careful!
 
         mapcoords: array-like
             The per-position coordinates to which to apply the colormap (a.k.a. texcoords).
